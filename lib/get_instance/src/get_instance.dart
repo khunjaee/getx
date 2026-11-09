@@ -357,12 +357,23 @@ class GetInstance {
 
     if (dep == null) return false;
 
-    final _InstanceBuilderFactory builder;
-    if (dep.isDirty) {
-      builder = dep.lateRemove ?? dep;
-    } else {
-      builder = dep;
+    // Re-registered while the previous route was still disposing: that
+    // route's delete belongs to the superseded instance, not the live one.
+    if (dep.lateRemove != null) {
+      var parent = dep;
+      while (parent.lateRemove!.lateRemove != null) {
+        parent = parent.lateRemove!;
+      }
+      final stale = parent.lateRemove!.dependency;
+      if (stale is GetLifeCycleBase) {
+        stale.onDelete();
+        Get.log('"$newKey" superseded instance onDelete() called');
+      }
+      parent.lateRemove = null;
+      return false;
     }
+
+    final builder = dep;
 
     if (builder.permanent && !force) {
       Get.log(
@@ -386,21 +397,18 @@ class GetInstance {
     if (builder.fenix) {
       builder.dependency = null;
       builder.isInit = false;
+      // Left dirty, the next binding of this key would supersede an empty
+      // factory and the following route dispose would miss the live instance.
+      builder.isDirty = false;
       return true;
     } else {
-      if (dep.lateRemove != null) {
-        dep.lateRemove = null;
-        Get.log('"$newKey" deleted from memory');
-        return false;
+      _singl.remove(newKey);
+      if (_singl.containsKey(newKey)) {
+        Get.log('Error removing object "$newKey"', isError: true);
       } else {
-        _singl.remove(newKey);
-        if (_singl.containsKey(newKey)) {
-          Get.log('Error removing object "$newKey"', isError: true);
-        } else {
-          Get.log('"$newKey" deleted from memory');
-        }
-        return true;
+        Get.log('"$newKey" deleted from memory');
       }
+      return true;
     }
   }
 
